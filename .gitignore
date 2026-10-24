@@ -1,0 +1,20 @@
+# Python virtual environment
+.venv/
+venv/
+ENV/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Local sensitive environment variables
+.env
+
+# Large raw datasets and local database
+data/raw/
+data/soc_database.sqlite
+
+# Knowledge base FAISS indexes
+knowledge_base/faiss_index/

@@ -1,0 +1,209 @@
+/* AI-Powered Autonomous SOC Assistant - Enterprise SOC Theme */
+
+:root {
+    --bg-primary: #070d19;
+    --bg-secondary: #0d1726;
+    --bg-card: #132238;
+    --bg-card-hover: #192c47;
+    --border-color: #203552;
+    --border-highlight: #00d2ff;
+    --text-primary: #f1f5f9;
+    --text-secondary: #94a3b8;
+    --text-muted: #64748b;
+    --accent-cyan: #06b6d4;
+    --accent-blue: #3b82f6;
+    --accent-indigo: #6366f1;
+    --alert-critical: #ef4444;
+    --alert-high: #f97316;
+    --alert-medium: #eab308;
+    --alert-low: #3b82f6;
+    --alert-benign: #10b981;
+}
+
+/* Global App Styling */
+.stApp {
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Helvetica Neue", sans-serif;
+}
+
+/* Sidebar styling */
+section[data-testid="stSidebar"] {
+    background-color: var(--bg-secondary) !important;
+    border-right: 1px solid var(--border-color);
+}
+
+section[data-testid="stSidebar"] .stMarkdown h1, 
+section[data-testid="stSidebar"] .stMarkdown h2, 
+section[data-testid="stSidebar"] .stMarkdown h3 {
+    color: #f8fafc;
+    letter-spacing: -0.02em;
+}
+
+/* Custom SOC Header Card */
+.soc-header-card {
+    background: linear-gradient(135deg, rgba(13, 23, 38, 0.9) 0%, rgba(19, 34, 56, 0.8) 100%);
+    border: 1px solid var(--border-color);
+    border-left: 4px solid var(--accent-cyan);
+    border-radius: 12px;
+    padding: 24px;
+    margin-bottom: 24px;
+    box-shadow: 0 8px 24px -4px rgba(0, 0, 0, 0.4);
+}
+
+.soc-header-title {
+    font-size: 1.85rem;
+    font-weight: 700;
+    color: #f8fafc;
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.soc-header-subtitle {
+    font-size: 0.95rem;
+    color: var(--text-secondary);
+    margin-top: 6px;
+    margin-bottom: 0;
+}
+
+/* Metric Cards */
+div[data-testid="stMetric"] {
+    background-color: var(--bg-card) !important;
+    padding: 16px 20px !important;
+    border-radius: 10px !important;
+    border: 1px solid var(--border-color) !important;
+    transition: all 0.25s ease-in-out;
+}
+
+div[data-testid="stMetric"]:hover {
+    border-color: var(--accent-cyan) !important;
+    transform: translateY(-2px);
+    box-shadow: 0 6px 18px rgba(6, 182, 212, 0.15);
+}
+
+div[data-testid="stMetric"] label {
+    font-size: 0.85rem !important;
+    color: var(--text-secondary) !important;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 600;
+}
+
+div[data-testid="stMetric"] div[data-testid="stMetricValue"] {
+    font-size: 1.85rem !important;
+    color: #ffffff !important;
+    font-weight: 700;
+}
+
+/* Custom Status Badges */
+.badge-critical {
+    background-color: rgba(239, 68, 68, 0.2);
+    color: #fca5a5;
+    border: 1px solid var(--alert-critical);
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-weight: 600;
+    font-size: 0.8rem;
+    display: inline-block;
+}
+
+.badge-high {
+    background-color: rgba(249, 115, 22, 0.2);
+    color: #fdba74;
+    border: 1px solid var(--alert-high);
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-weight: 600;
+    font-size: 0.8rem;
+    display: inline-block;
+}
+
+.badge-medium {
+    background-color: rgba(234, 179, 8, 0.2);
+    color: #fde047;
+    border: 1px solid var(--alert-medium);
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-weight: 600;
+    font-size: 0.8rem;
+    display: inline-block;
+}
+
+.badge-low {
+    background-color: rgba(59, 130, 246, 0.2);
+    color: #93c5fd;
+    border: 1px solid var(--alert-low);
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-weight: 600;
+    font-size: 0.8rem;
+    display: inline-block;
+}
+
+.badge-benign {
+    background-color: rgba(16, 185, 129, 0.2);
+    color: #6ee7b7;
+    border: 1px solid var(--alert-benign);
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-weight: 600;
+    font-size: 0.8rem;
+    display: inline-block;
+}
+
+/* Modern Card Container */
+.soc-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    padding: 20px;
+    margin-bottom: 20px;
+}
+
+.soc-card h3 {
+    margin-top: 0;
+    color: #f1f5f9;
+    font-size: 1.15rem;
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 10px;
+    margin-bottom: 14px;
+}
+
+/* Button Refinement */
+.stButton > button {
+    background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%) !important;
+    color: #ffffff !important;
+    font-weight: 600 !important;
+    border: 1px solid #3b82f6 !important;
+    border-radius: 8px !important;
+    padding: 8px 18px !important;
+    transition: all 0.2s ease-in-out !important;
+}
+
+.stButton > button:hover {
+    background: linear-gradient(135deg, #1d4ed8 0%, #1e40af 100%) !important;
+    border-color: #60a5fa !important;
+    box-shadow: 0 4px 14px rgba(37, 99, 235, 0.35) !important;
+}
+
+/* Dataframe Styling */
+div[data-testid="stDataFrame"] {
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+    overflow: hidden;
+}
+
+/* Dividers */
+hr {
+    border-color: var(--border-color) !important;
+    margin: 20px 0 !important;
+}
+
+/* Alerts and Callouts */
+div.stAlert {
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+    background-color: var(--bg-card);
+}

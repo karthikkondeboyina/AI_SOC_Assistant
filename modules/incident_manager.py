@@ -49,8 +49,9 @@ def group_suspicious_flows_into_incidents(
         else:
             sev = "Low"
             
-        # Extract sample evidence from the top risk flow in this group
-        top_row = group.sort_values(by="risk_score", ascending=False).iloc[0].to_dict() if "risk_score" in group.columns else group.iloc[0].to_dict()
+        # Extract sample evidence from the top risk flow in this group (O(N) instead of O(N log N) sort)
+        top_idx = group["risk_score"].idxmax() if "risk_score" in group.columns else group.index[0]
+        top_row = group.loc[top_idx].to_dict()
         evidence_summary = summarize_flow_evidence(top_row)
         
         incidents.append({

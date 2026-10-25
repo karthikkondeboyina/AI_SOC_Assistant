@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 import json
 import uuid
+import time
 from datetime import datetime
 
 import streamlit as st
@@ -311,8 +312,18 @@ elif page == "📁 Upload Security Data":
     # Display Dataset Diagnostics if loaded
     if st.session_state.dataset is not None:
         df = st.session_state.dataset
-        cleaned_preview, clean_stats = clean_dataset(df)
         
+        # Cache profiling in session state so tab navigation is instant
+        if "clean_stats" not in st.session_state or st.session_state.get("cleaned_for_file") != st.session_state.filename:
+            with st.spinner("Profiling dataset..."):
+                cleaned_preview, clean_stats = clean_dataset(df.head(10000) if len(df) > 10000 else df)
+                st.session_state.cleaned_preview = cleaned_preview
+                st.session_state.clean_stats = clean_stats
+                st.session_state.cleaned_for_file = st.session_state.filename
+        else:
+            cleaned_preview = st.session_state.cleaned_preview
+            clean_stats = st.session_state.clean_stats
+            
         st.subheader("📋 Dataset Telemetry Profile")
         
         m1, m2, m3, m4, m5 = st.columns(5)
@@ -379,8 +390,13 @@ elif page == "📊 Data Analytics":
                 with col_scale:
                     log_scale = st.checkbox("Logarithmic Y-Axis", value=True)
                     
+                # Downsample large datasets for instant chart rendering without browser lag
+                plot_sample = df[[feature]].sample(min(len(df), 50000), random_state=42) if len(df) > 50000 else df[[feature]]
+                if len(df) > 50000:
+                    st.caption(f"⚡ Displaying high-fidelity distribution sample (50,000 of {len(df):,} records)")
+                    
                 fig = px.histogram(
-                    df,
+                    plot_sample,
                     x=feature,
                     nbins=50,
                     log_y=log_scale,
@@ -411,7 +427,9 @@ elif page == "📊 Data Analytics":
             selected_corr_cols = [c for c in candidate_cols if c in clean_cols]
             
             if len(selected_corr_cols) >= 3:
-                sub_df = df[selected_corr_cols].replace([np.inf, -np.inf], np.nan).dropna()
+                # Sample up to 25,000 for instant correlation matrix
+                sample_corr_df = df[selected_corr_cols].sample(min(len(df), 25000), random_state=42) if len(df) > 25000 else df[selected_corr_cols]
+                sub_df = sample_corr_df.replace([np.inf, -np.inf], np.nan).dropna()
                 corr_matrix = sub_df.corr()
                 
                 fig_heat = px.imshow(
@@ -435,7 +453,10 @@ elif page == "📊 Data Analytics":
                     break
                     
             if label_col:
-                clean_series = df[label_col].apply(clean_label_string)
+                # Fast label cleaning via unique value mapping
+                unique_raw = df[label_col].dropna().unique()
+                lbl_map = {lbl: clean_label_string(lbl) for lbl in unique_raw}
+                clean_series = df[label_col].map(lbl_map).fillna("Unknown")
                 label_counts = clean_series.value_counts().reset_index()
                 label_counts.columns = ["True Label", "Count"]
                 
@@ -473,21 +494,47 @@ elif page == "🚨 Threat Detection":
         
         c_ctrl1, c_ctrl2 = st.columns([3, 1])
         with c_ctrl1:
-            st.write(f"Target Telemetry File: `{st.session_state.filename}` ({len(df):,} records)")
+            st.write(f"Target Telemetry File: `{st.session_state.filename}` ({len(df):,} total flows)")
         with c_ctrl2:
             asset_crit = st.selectbox("Asset Criticality Level", ["Standard", "High", "Mission-Critical", "Low"], index=0)
             
+        # Analysis batch controls for responsive triage of large network captures
+        if len(df) > 10000:
+            scope_choices = [
+                f"🚀 Fast Triage (First 10,000 flows — Instant Screen)",
+                f"⚡ Standard Batch (First 50,000 flows — Comprehensive)",
+                f"🌐 Full File ({len(df):,} flows — Deep Analysis)"
+            ]
+            batch_choice = st.radio(
+                "Analysis Batch Scope",
+                scope_choices,
+                index=0,
+                horizontal=True,
+                help="Select batch size for threat detection. Fast Triage provides instantaneous feedback for rapid incident response."
+            )
+            if "10,000" in batch_choice:
+                eval_df = df.head(10000)
+            elif "50,000" in batch_choice:
+                eval_df = df.head(50000)
+            else:
+                eval_df = df
+        else:
+            eval_df = df
+            
+        st.caption(f"Ready to classify **{len(eval_df):,}** network flows using trained Random Forest pipeline.")
+            
         if st.button("⚡ Execute Threat Detection & Risk Scoring", use_container_width=True):
-            with st.spinner("Classifying network flows and calculating risk scores..."):
+            with st.spinner(f"Classifying {len(eval_df):,} network flows and calculating risk scores..."):
+                t_start = time.time()
                 run_id = f"RUN-{datetime.now().strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:4].upper()}"
                 
                 # 1. Threat Detection
-                results_df, summary = detect_threats(df)
+                results_df, summary = detect_threats(eval_df)
                 
                 if results_df is None:
                     st.error(summary.get("error", "Detection pipeline failed."))
                 else:
-                    # 2. Risk Scoring
+                    # 2. Risk Scoring (vectorized NumPy computation)
                     scored_df = batch_calculate_risk(results_df, asset_criticality=asset_crit)
                     
                     # 3. Group Incidents
@@ -510,12 +557,23 @@ elif page == "🚨 Threat Detection":
                     )
                     save_incidents(incidents)
                     
+                    elapsed = time.time() - t_start
+                    summary["elapsed_seconds"] = round(elapsed, 2)
+                    
+                    # Pre-generate CSV export to avoid lag on subsequent renders
+                    display_cols = [
+                        "predicted_class", "confidence", "risk_score", "severity",
+                        "is_suspicious", "Protocol", "Flow Duration"
+                    ]
+                    available_display_cols = [c for c in display_cols if c in scored_df.columns]
+                    st.session_state.cached_report_csv = scored_df[available_display_cols].to_csv(index=False).encode("utf-8")
+                    
                     # Store in session state
                     st.session_state.analysis_results = scored_df
                     st.session_state.analysis_summary = summary
                     st.session_state.current_incidents = incidents
                     
-                    st.success(f"Analysis completed successfully! {summary['suspicious_count']:,} suspicious flows identified.")
+                    st.success(f"Analysis completed in {elapsed:.2f}s! {summary['suspicious_count']:,} suspicious flows identified.")
                     st.rerun()
 
     # Display Current Detection Results
@@ -526,11 +584,12 @@ elif page == "🚨 Threat Detection":
         st.divider()
         st.subheader("🔍 Detection Summary Diagnostics")
         
-        s1, s2, s3, s4 = st.columns(4)
+        s1, s2, s3, s4, s5 = st.columns(5)
         s1.metric("Total Records Evaluated", f"{summary['total_records']:,}")
         s2.metric("Benign Normal Traffic", f"{summary['benign_count']:,}")
         s3.metric("Suspicious Threat Flows", f"{summary['suspicious_count']:,}")
         s4.metric("Threat Detection Rate", f"{summary['suspicious_percentage']}%")
+        s5.metric("Analysis Latency", f"{summary.get('elapsed_seconds', '< 1')}s")
         
         st.markdown("<br>", unsafe_allow_html=True)
         
@@ -547,8 +606,12 @@ elif page == "🚨 Threat Detection":
             use_container_width=True
         )
         
-        # Downloadable Report
-        csv_data = scored_df[available_display_cols].to_csv(index=False).encode("utf-8")
+        # Downloadable Report (Cached bytes - zero latency)
+        if "cached_report_csv" in st.session_state and st.session_state.cached_report_csv:
+            csv_data = st.session_state.cached_report_csv
+        else:
+            csv_data = scored_df[available_display_cols].head(10000).to_csv(index=False).encode("utf-8")
+            
         st.download_button(
             label="📥 Download Detection Report (CSV)",
             data=csv_data,

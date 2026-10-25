@@ -102,7 +102,9 @@ def clean_dataset(
                 break
                 
     if detected_target and detected_target in cleaned_df.columns:
-        cleaned_df[detected_target] = cleaned_df[detected_target].apply(clean_label_string)
+        uniq_labels = cleaned_df[detected_target].dropna().unique()
+        label_map = {lbl: clean_label_string(lbl) for lbl in uniq_labels}
+        cleaned_df[detected_target] = cleaned_df[detected_target].map(label_map).fillna("Unknown")
         
     # Isolate numerical features
     num_cols = cleaned_df.select_dtypes(include=[np.number]).columns.tolist()
@@ -134,8 +136,8 @@ def prepare_features_for_inference(
     Prepares an uploaded DataFrame for model inference:
     1. Normalizes column names
     2. Drops target/label column if present (prevents leakage)
-    3. Aligns columns strictly to the expected feature list
-    4. Replaces inf/nan values
+    3. Aligns columns strictly to the expected feature list in a single vectorized reindex
+    4. Rapidly replaces inf/nan values using C-level NumPy nan_to_num
     Returns feature matrix (X) and list of missing columns if any.
     """
     cleaned_df = clean_column_names(df)
@@ -148,15 +150,13 @@ def prepare_features_for_inference(
     # Check for missing features
     missing_cols = [col for col in expected_features if col not in cleaned_df.columns]
     
-    # If some columns are missing, add them with 0.0 value
-    for col in missing_cols:
-        cleaned_df[col] = 0.0
-        
-    # Reorder columns to strictly match training order
-    X = cleaned_df[expected_features].copy()
+    # Fast reindex: populates missing columns with 0.0 in one shot
+    X = cleaned_df.reindex(columns=expected_features, fill_value=0.0)
     
-    # Clean infinities and NaNs in numerical values
-    X = X.replace([np.inf, -np.inf], np.nan)
-    X = X.fillna(0.0)
+    # Fast NumPy in-place cleanup of inf/nan
+    X_vals = X.to_numpy(dtype=np.float32, copy=True)
+    np.nan_to_num(X_vals, copy=False, nan=0.0, posinf=0.0, neginf=0.0)
+    X = pd.DataFrame(X_vals, columns=expected_features, index=cleaned_df.index)
     
     return X, missing_cols
+

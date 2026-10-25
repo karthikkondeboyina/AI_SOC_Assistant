@@ -197,7 +197,7 @@ if page == "🏠 Dashboard Overview":
                     color_discrete_sequence=px.colors.sequential.Tealgrn_r
                 )
                 fig_pie.update_layout(margin=dict(t=20, b=20, l=20, r=20), height=320)
-                st.plotly_chart(fig_pie, use_container_width=True)
+                st.plotly_chart(fig_pie, width='stretch')
             else:
                 st.info("No suspicious attack events detected in the active dataset.")
                 
@@ -223,7 +223,7 @@ if page == "🏠 Dashboard Overview":
                 template="plotly_dark"
             )
             fig_bar.update_layout(margin=dict(t=20, b=20, l=20, r=20), height=320, showlegend=False)
-            st.plotly_chart(fig_bar, use_container_width=True)
+            st.plotly_chart(fig_bar, width='stretch')
             
     else:
         # Informative Empty State
@@ -247,7 +247,7 @@ if page == "🏠 Dashboard Overview":
                 "Logged At": inc["created_at"][:19].replace("T", " ")
             })
             
-        st.dataframe(pd.DataFrame(inc_data), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(inc_data), width='stretch', hide_index=True)
     else:
         st.markdown("""
         <div style="background-color: #132238; border: 1px dashed #203552; border-radius: 8px; padding: 24px; text-align: center;">
@@ -282,7 +282,7 @@ elif page == "📁 Upload Security Data":
         st.subheader("Or Load Built-in Test Dataset")
         sample_path = SAMPLE_DATA_DIR / "sample_soc_traffic.csv"
         if sample_path.exists():
-            if st.button("🚀 Load Sample Dataset (1,000 real flows)", use_container_width=True):
+            if st.button("🚀 Load Sample Dataset (1,000 real flows)", width='stretch'):
                 sample_df = pd.read_csv(sample_path)
                 st.session_state.dataset = sample_df
                 st.session_state.filename = "sample_soc_traffic.csv"
@@ -345,7 +345,7 @@ elif page == "📁 Upload Security Data":
             
         # Dataset Preview Table
         st.subheader("Data Preview (First 50 Rows)")
-        st.dataframe(cleaned_preview.head(50), use_container_width=True)
+        st.dataframe(cleaned_preview.head(50), width='stretch')
         
         with st.expander("🔍 View All Column Names and Data Types"):
             sample_vals = [str(x) for x in cleaned_preview.iloc[0].values] if len(cleaned_preview) > 0 else []
@@ -354,7 +354,7 @@ elif page == "📁 Upload Security Data":
                 "Data Type": [str(t) for t in cleaned_preview.dtypes],
                 "Sample Value": sample_vals if sample_vals else ["N/A"] * len(cleaned_preview.columns)
             })
-            st.dataframe(dtypes_df, use_container_width=True, hide_index=True)
+            st.dataframe(dtypes_df, width='stretch', hide_index=True)
     else:
         st.info("Please upload a file or click 'Load Sample Dataset' above to inspect network telemetry.")
 
@@ -405,12 +405,12 @@ elif page == "📊 Data Analytics":
                     color_discrete_sequence=["#06B6D4"]
                 )
                 fig.update_layout(height=420)
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
                 
                 # Statistical Breakdown
                 st.markdown("#### Descriptive Statistics")
                 stats_df = df[feature].describe().to_frame().T
-                st.dataframe(stats_df, use_container_width=True)
+                st.dataframe(stats_df, width='stretch')
             else:
                 st.info("No numeric features found for distribution plotting.")
                 
@@ -440,7 +440,7 @@ elif page == "📊 Data Analytics":
                     title="Correlation Matrix of Selected Telemetry Features"
                 )
                 fig_heat.update_layout(height=520)
-                st.plotly_chart(fig_heat, use_container_width=True)
+                st.plotly_chart(fig_heat, width='stretch')
             else:
                 st.info("Selected network flow columns not found in the uploaded dataset.")
                 
@@ -468,8 +468,8 @@ elif page == "📊 Data Analytics":
                     template="plotly_dark",
                     title=f"Ground-Truth Class Frequencies ({label_col})"
                 )
-                st.plotly_chart(fig_labels, use_container_width=True)
-                st.dataframe(label_counts, use_container_width=True, hide_index=True)
+                st.plotly_chart(fig_labels, width='stretch')
+                st.dataframe(label_counts, width='stretch', hide_index=True)
             else:
                 st.info("Uploaded dataset does not contain a ground-truth 'Label' column (unlabeled inference data).")
 
@@ -523,7 +523,7 @@ elif page == "🚨 Threat Detection":
             
         st.caption(f"Ready to classify **{len(eval_df):,}** network flows using trained Random Forest pipeline.")
             
-        if st.button("⚡ Execute Threat Detection & Risk Scoring", use_container_width=True):
+        if st.button("⚡ Execute Threat Detection & Risk Scoring", width='stretch'):
             with st.spinner(f"Classifying {len(eval_df):,} network flows and calculating risk scores..."):
                 t_start = time.time()
                 run_id = f"RUN-{datetime.now().strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:4].upper()}"
@@ -603,7 +603,7 @@ elif page == "🚨 Threat Detection":
         
         st.dataframe(
             scored_df[available_display_cols].head(100),
-            use_container_width=True
+            width='stretch'
         )
         
         # Downloadable Report (Cached bytes - zero latency)
@@ -617,7 +617,7 @@ elif page == "🚨 Threat Detection":
             data=csv_data,
             file_name=f"soc_threat_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
             mime="text/csv",
-            use_container_width=True
+            width='stretch'
         )
 
 # ==============================================================================
@@ -689,7 +689,7 @@ elif page == "🛡️ Security Incidents":
                         st.success(f"Updated status of {inc['incident_id']} to '{new_st}'")
                         st.rerun()
                 with col_btn2:
-                    if st.button("🤖 Investigate with AI", key=f"inv_btn_{inc['incident_id']}", use_container_width=True):
+                    if st.button("🤖 Investigate with AI", key=f"inv_btn_{inc['incident_id']}", width='stretch'):
                         st.session_state.selected_incident_id = inc["incident_id"]
                         st.info(f"Selected {inc['incident_id']} for investigation. Switch to the 'AI Investigation' page in the sidebar.")
 
@@ -760,7 +760,7 @@ elif page == "🤖 AI Investigation":
             # Generate Advisory Button
             btn_col1, btn_col2 = st.columns([2, 2])
             with btn_col1:
-                gen_button = st.button("🚀 Generate Gemini AI Advisory Report", use_container_width=True)
+                gen_button = st.button("🚀 Generate Gemini AI Advisory Report", width='stretch')
                 
             if gen_button:
                 if not is_gemini_configured():
@@ -932,7 +932,7 @@ elif page == "⚙️ System Status":
         }
     ]
     
-    st.dataframe(pd.DataFrame(status_table), use_container_width=True, hide_index=True)
+    st.dataframe(pd.DataFrame(status_table), width='stretch', hide_index=True)
     
     st.divider()
     
@@ -965,7 +965,6 @@ elif page == "⚙️ System Status":
 st.divider()
 st.markdown("""
 <div style="text-align: center; color: #64748B; font-size: 0.82rem; padding: 10px 0;">
-    🛡️ <b>AI-Powered Autonomous SOC Assistant</b> | B.Tech Data Science Final-Year Project<br>
-    Defensive Security Telemetry Analysis • MITRE ATT&CK Mapped • Decision Support Only
+    🛡️ <b>AI-Powered Autonomous SOC Assistant</b> |• MITRE ATT&CK Mapped • Decision Support Only
 </div>
 """, unsafe_allow_html=True)

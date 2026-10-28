@@ -45,13 +45,25 @@ from modules.database import (
     update_incident_status,
     save_investigation_report,
     get_investigation_report,
-    get_db_metrics
+    get_db_metrics,
+    get_monitored_agents,
+    get_live_alerts,
+    get_live_alert_by_id,
+    update_live_alert_status,
+    get_recent_security_events,
+    get_live_monitoring_metrics,
+    convert_alert_to_incident
 )
 from modules.incident_manager import group_suspicious_flows_into_incidents
 from modules.llm_analysis import is_gemini_configured, analyze_security_incident, ask_incident_question
 from modules.rag_system import get_rag_system
 from modules.mitre_mapping import map_threat_to_mitre, OFFICIAL_MITRE_MAPPINGS
 from utils.helpers import format_number, format_bytes, get_severity_badge_html
+from modules.live_monitor.windows_collector import WindowsSecurityLogCollector
+from modules.live_monitor.detection_rules import get_live_detection_engine
+from simulation.simulate_logs import generate_scenario_events
+from config.settings import SOC_API_HOST, SOC_API_PORT, SOC_AGENT_TOKEN
+import httpx
 
 # ==============================================================================
 # 1. PAGE CONFIGURATION & STYLING
@@ -110,6 +122,8 @@ with st.sidebar:
         "OPERATIONAL NAVIGATION",
         [
             "🏠 Dashboard Overview",
+            "📡 Live Security Monitor",
+            "💻 Agent Management",
             "📁 Upload Security Data",
             "📊 Data Analytics",
             "🚨 Threat Detection",
@@ -255,6 +269,302 @@ if page == "🏠 Dashboard Overview":
             <p style="color: #64748B; font-size: 0.85rem; margin-top: 6px;">Execute Threat Detection on a network dataset to record and triage security incidents.</p>
         </div>
         """, unsafe_allow_html=True)
+
+# ==============================================================================
+# PAGE: LIVE SECURITY MONITOR
+# ==============================================================================
+
+elif page == "📡 Live Security Monitor":
+    st.markdown("""
+    <div class="soc-header-card">
+        <h1 class="soc-header-title"><span>📡</span> Near-Real-Time Host Security Monitor</h1>
+        <p class="soc-header-subtitle">Stream continuous authentication events, detect brute force & password spray patterns, and triage live alerts</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    live_metrics = get_live_monitoring_metrics()
+
+    # Check Ingestion API Status
+    api_online = False
+    try:
+        with httpx.Client(timeout=1.0) as client:
+            r = client.get(f"http://{SOC_API_HOST}:{SOC_API_PORT}/health")
+            if r.status_code == 200:
+                api_online = True
+    except Exception:
+        api_online = False
+
+    # Top KPI Metrics Cards
+    k1, k2, k3, k4, k5, k6 = st.columns(6)
+    k1.metric("Ingestion API", "🟢 Online" if api_online else "🔴 Offline")
+    k2.metric("Connected Agents", f"{live_metrics['active_agents']} / {live_metrics['total_agents']}")
+    k3.metric("Total Events", f"{live_metrics['total_events']:,}")
+    k4.metric("Failed Logins", f"{live_metrics['failed_logins']:,}")
+    k5.metric("Active Alerts", f"{live_metrics['active_alerts']}")
+    k6.metric("Critical / High", f"{live_metrics['critical_alerts']}")
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    if not api_online:
+        st.warning(f"⚠️ Central Ingestion API service is offline at http://{SOC_API_HOST}:{SOC_API_PORT}. Start the API in a separate terminal: `python -m api.server` to receive live telemetry from network agents.")
+
+    tab_alerts, tab_events, tab_local, tab_sim = st.tabs([
+        "🚨 Live Alerts Queue",
+        "📋 Ingested Security Events",
+        "🖥️ Local Windows Collector",
+        "🧪 Live Attack Simulator"
+    ])
+
+    with tab_alerts:
+        st.subheader("🚨 Real-Time Security Alerts (Sliding-Window Engine)")
+        
+        c_f1, c_f2 = st.columns(2)
+        with c_f1:
+            sev_filter = st.selectbox("Filter Alert Severity", ["All", "Critical", "High", "Medium", "Low"], key="live_sev_filter")
+        with c_f2:
+            stat_filter = st.selectbox("Filter Alert Status", ["All", "New", "Investigating", "Resolved", "False Positive"], key="live_stat_filter")
+            
+        alerts = get_live_alerts(limit=50, severity=sev_filter, status=stat_filter)
+        
+        if not alerts:
+            st.info("No active threat alerts in the queue. Run the 'Live Attack Simulator' tab to generate synthetic security alerts.")
+        else:
+            st.write(f"Displaying **{len(alerts)}** active threat alerts:")
+            for alt in alerts:
+                with st.container():
+                    st.markdown(f"""
+                    <div class="soc-card">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <h4 style="margin: 0; color: #F8FAFC;">🚨 {alt['alert_id']} - {alt['rule_name']}</h4>
+                            <div>
+                                {get_severity_badge_html(alt['severity'])}
+                                <span style="background: #1E293B; border: 1px solid #334155; padding: 4px 10px; border-radius: 6px; font-size: 0.8rem; margin-left: 8px;">
+                                    Status: <b>{alt['status']}</b>
+                                </span>
+                            </div>
+                        </div>
+                        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin: 15px 0; font-size: 0.9rem;">
+                            <div><b>Risk Score:</b> <span style="color: #06B6D4;">{alt['risk_score']:.1f}/100</span></div>
+                            <div><b>Target Host:</b> <code>{alt['hostname']}</code> ({alt['agent_id']})</div>
+                            <div><b>Target Account:</b> <code>{alt['username'] or 'N/A'}</code></div>
+                            <div><b>Source IP:</b> <code>{alt['source_ip'] or 'Internal/Local'}</code></div>
+                        </div>
+                        <p style="color: #F1F5F9; font-size: 0.88rem; margin: 6px 0;"><b>Evidence:</b> {alt['evidence_summary']}</p>
+                        <p style="color: #94A3B8; font-size: 0.82rem; margin: 4px 0;"><b>MITRE ATT&CK:</b> <a href="{map_threat_to_mitre(alt['rule_name'])['url']}" target="_blank" style="color: #38BDF8;">{alt['mitre_technique_id']} - {alt['mitre_technique_name']}</a> | <b>Attempts:</b> {alt['event_count']} within sliding window</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                    c_act1, c_act2 = st.columns([3, 1])
+                    with c_act1:
+                        new_alt_st = st.selectbox(
+                            "Update Alert Status",
+                            ["New", "Investigating", "Resolved", "False Positive"],
+                            index=["New", "Investigating", "Resolved", "False Positive"].index(alt["status"]),
+                            key=f"alt_st_{alt['alert_id']}"
+                        )
+                        if new_alt_st != alt["status"]:
+                            update_live_alert_status(alt["alert_id"], new_alt_st)
+                            st.success(f"Updated alert status to '{new_alt_st}'")
+                            st.rerun()
+                    with c_act2:
+                        if st.button("🤖 Investigate with AI", key=f"inv_alt_{alt['alert_id']}", width='stretch'):
+                            inc_id = convert_alert_to_incident(alt["alert_id"])
+                            if inc_id:
+                                st.session_state.selected_incident_id = inc_id
+                                st.success(f"Escalated alert to Incident `{inc_id}`! Navigate to '🤖 AI Investigation' in the sidebar to review Gemini advisory report.")
+                            else:
+                                st.error("Failed to promote alert to incident.")
+
+    with tab_events:
+        st.subheader("📋 Ingested Security Events Telemetry")
+        c_e1, c_e2 = st.columns(2)
+        with c_e1:
+            ev_type_filter = st.selectbox("Filter Event Type", ["All", "FAILED_LOGIN", "SUCCESSFUL_LOGIN", "ACCOUNT_LOCKOUT", "LOGOFF"], key="ev_type_filter")
+        with c_e2:
+            ev_limit = st.selectbox("Records Limit", [50, 100, 200], index=1, key="ev_limit")
+            
+        recent_events = get_recent_security_events(limit=ev_limit, event_type=ev_type_filter)
+        if recent_events:
+            ev_display = []
+            for e in recent_events:
+                ev_display.append({
+                    "Timestamp (UTC)": e["timestamp"][:19].replace("T", " "),
+                    "Hostname": e["hostname"],
+                    "Agent ID": e["agent_id"],
+                    "Event Type": e["event_type"],
+                    "Win Event ID": e["windows_event_id"] or "N/A",
+                    "Username": e["username"],
+                    "Source IP": e["source_ip"] or "Local",
+                    "Description": e["description"]
+                })
+            st.dataframe(pd.DataFrame(ev_display), width='stretch', hide_index=True)
+        else:
+            st.info("No security events ingested yet. Send events using the simulator or local collector.")
+
+    with tab_local:
+        st.subheader("🖥️ Local Windows Security Event Log Collector")
+        st.write("Reads authentic Windows Security Event Logs (Event IDs 4624, 4625, 4634, 4740) from this machine.")
+        
+        col_win = WindowsSecurityLogCollector()
+        env_status = col_win.check_environment()
+        
+        c_diag1, c_diag2 = st.columns([2, 1])
+        with c_diag1:
+            st.markdown(f"""
+            <div style="background-color: #0F172A; border: 1px solid #334155; border-radius: 8px; padding: 18px; margin-bottom: 15px;">
+                <h4 style="margin: 0; color: #F8FAFC;">Collector Diagnostic Status: {'🟢 Ready' if env_status['capable'] else '🟡 Limited Privileges'}</h4>
+                <p style="margin: 8px 0 0 0; color: #94A3B8; font-size: 0.9rem;"><b>OS:</b> {env_status.get('os')} | <b>Platform API:</b> pywin32 EvtQuery</p>
+                <p style="margin: 4px 0 0 0; color: #94A3B8; font-size: 0.88rem;"><b>Diagnostics:</b> {env_status.get('reason')}</p>
+                <p style="margin: 4px 0 0 0; color: #38BDF8; font-size: 0.85rem;"><b>Recommended Action:</b> {env_status.get('solution')}</p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+        with c_diag2:
+            st.metric("Last Processed Record", f"#{col_win.last_record_id}")
+            
+        if env_status["capable"]:
+            if st.button("⚡ Collect & Ingest New Local Windows Events", width='stretch'):
+                with st.spinner("Querying Windows Event Log channel..."):
+                    collected_events, diag = col_win.collect_new_events(max_events=100)
+                    if collected_events:
+                        engine = get_live_detection_engine()
+                        raw_dicts = [e.model_dump() for e in collected_events]
+                        inserted = save_security_events_batch(raw_dicts)
+                        alerts_trig = engine.process_batch(collected_events)
+                        for a in alerts_trig:
+                            save_live_alert(a.to_dict())
+                        st.success(f"Collected {len(collected_events)} new Windows security events! ({inserted} ingested, {len(alerts_trig)} alerts triggered)")
+                        st.rerun()
+                    else:
+                        st.info("No new authentication events recorded in the Windows Security Log since last bookmark.")
+        else:
+            st.info("💡 **College Demo Note**: Reading Windows Security Event Logs requires Administrator rights. To demonstrate live threat detection safely without Administrator elevation, switch to the **🧪 Live Attack Simulator** tab.")
+
+    with tab_sim:
+        st.subheader("🧪 Safe Test Event Simulator")
+        st.write("Generate synthetic authentication event streams to safely test and demonstrate near-real-time detection rules, risk scoring, and AI escalation.")
+        
+        c_sim1, c_sim2 = st.columns(2)
+        with c_sim1:
+            sim_scenario = st.selectbox(
+                "Select Attack / Telemetry Scenario",
+                [
+                    "failed-logins",
+                    "password-spray",
+                    "lockout",
+                    "rdp-brute",
+                    "normal",
+                    "mixed"
+                ],
+                format_func=lambda s: {
+                    "failed-logins": "🚨 Repeated Failed Logins (Rule 1 & Rule 2 Brute-Force)",
+                    "password-spray": "🌊 Password Spraying (Rule 3 Single IP vs Multi-User)",
+                    "lockout": "🔒 Account Lockout Triggered (Rule 4 Event 4740)",
+                    "rdp-brute": "💻 Remote Desktop RDP Failure (Rule 5)",
+                    "normal": "🟢 Normal Benign Activity (Successful Logons & Logoffs)",
+                    "mixed": "⚡ Mixed Operational Security Stream"
+                }.get(s, s)
+            )
+        with c_sim2:
+            sim_host = st.text_input("Simulated Hostname", value="FINANCE-SRV-01")
+            
+        sim_count = st.slider("Number of Events to Generate", min_value=5, max_value=25, value=10)
+        
+        if st.button("🚀 Execute Safe Demonstration Stream", width='stretch'):
+            with st.spinner("Generating and ingesting synthetic security telemetry..."):
+                synthetic_evs = generate_scenario_events(
+                    scenario=sim_scenario,
+                    agent_id=f"sim-{sim_host.lower()}",
+                    hostname=sim_host,
+                    count=sim_count
+                )
+                
+                # Register agent
+                register_or_update_agent(agent_id=f"sim-{sim_host.lower()}", hostname=sim_host, ip_address="192.168.1.155", os_type="Windows (Simulated)")
+                
+                # Ingest to DB
+                raw_dicts = [e.model_dump() for e in synthetic_evs]
+                inserted = save_security_events_batch(raw_dicts)
+                
+                # Run Live Engine
+                engine = get_live_detection_engine()
+                triggered = engine.process_batch(synthetic_evs)
+                for a in triggered:
+                    save_live_alert(a.to_dict())
+                    
+                st.success(f"Stream complete! Ingested {inserted} synthetic events. Triggered **{len(triggered)}** threat detection alerts!")
+                st.rerun()
+
+# ==============================================================================
+# PAGE: AGENT MANAGEMENT
+# ==============================================================================
+
+elif page == "💻 Agent Management":
+    st.markdown("""
+    <div class="soc-header-card">
+        <h1 class="soc-header-title"><span>💻</span> Monitored Computer & Agent Fleet Management</h1>
+        <p class="soc-header-subtitle">Monitor authorized endpoint agents across local Windows computers and LAN network nodes</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    agents = get_monitored_agents()
+    
+    c_m1, c_m2, c_m3 = st.columns(3)
+    active_count = sum(1 for a in agents if a.get("status") == "Active")
+    c_m1.metric("Registered Agents", len(agents))
+    c_m2.metric("Online & Active", active_count)
+    c_m3.metric("Offline / Inactive", len(agents) - active_count)
+    
+    st.markdown("<br>", unsafe_allow_html=True)
+    
+    st.subheader("📋 Registered Endpoints Fleet")
+    if agents:
+        agent_display = []
+        for a in agents:
+            agent_display.append({
+                "Agent ID": a["agent_id"],
+                "Hostname": a["hostname"],
+                "IP Address": a["ip_address"] or "127.0.0.1",
+                "OS Type": a["os_type"] or "Windows",
+                "Status": "🟢 Active" if a.get("status") == "Active" else "🟡 Inactive",
+                "Total Events": f"{a.get('total_events', 0):,}",
+                "Last Seen (UTC)": a["last_seen"][:19].replace("T", " "),
+                "Registered At": a["registered_at"][:19].replace("T", " "),
+                "Version": a.get("agent_version", "2.0.0")
+            })
+        st.dataframe(pd.DataFrame(agent_display), width='stretch', hide_index=True)
+    else:
+        st.info("No monitoring agents registered yet. Start an agent or launch the simulator to connect endpoints.")
+        
+    st.divider()
+    
+    st.subheader("🚀 Deploying a New Monitoring Agent on LAN")
+    st.markdown("""
+    Follow these steps to monitor a remote Windows or Linux computer connected to the same LAN / Wi-Fi network:
+
+    #### Step 1: Start Central SOC Ingestion Server
+    On your main SOC host machine, start the FastAPI ingestion service:
+    ```powershell
+    python -m api.server
+    ```
+    *Ensure your Windows Firewall allows inbound TCP connections on port 8000.*
+
+    #### Step 2: Deploy Lightweight Agent on Authorized Computer
+    Copy the `agent/` folder to the target machine and execute:
+    ```powershell
+    # Windows Target Host
+    python -m agent.agent --server http://<YOUR_SOC_SERVER_IP>:8000 --token soc-secure-agent-token-2026 --agent-id remote-pc-02
+    ```
+    ```bash
+    # Linux Target Host (run with auth.log read permissions)
+    python -m agent.agent --server http://<YOUR_SOC_SERVER_IP>:8000 --token soc-secure-agent-token-2026 --agent-id linux-server-01
+    ```
+
+    #### Security & Safety Guarantees:
+    - **No Remote Command Execution**: Agents only push telemetry; the central server cannot execute commands on remote hosts.
+    - **No Password Collection**: The agent parser explicitly strips and ignores authentication secrets.
+    - **Resilient Bounded Queue**: If the network is interrupted, events buffer in an in-memory queue and retry with exponential backoff.
+    """)
 
 # ==============================================================================
 # PAGE 2: SECURITY DATA UPLOAD
@@ -926,9 +1236,27 @@ elif page == "⚙️ System Status":
         },
         {
             "Subsystem": "MITRE ATT&CK Matrix",
-            "Status": "🟢 14 Techniques Mapped",
+            "Status": "🟢 19 Techniques Mapped",
             "Version": "v14.1 Enterprise",
-            "Details": "Validated URLs and network flow behavioral rationales"
+            "Details": "Validated URLs, network flows and Windows Event ID rationales"
+        },
+        {
+            "Subsystem": "Central Ingestion API (FastAPI)",
+            "Status": "🟢 Supported (Port 8000)",
+            "Version": "FastAPI 0.110+",
+            "Details": "Authenticated REST endpoint with Pydantic validation and duplicate protection"
+        },
+        {
+            "Subsystem": "Windows Security Event Collector",
+            "Status": "🟢 Integrated (pywin32)",
+            "Version": "Event IDs 4624/4625/4634/4740",
+            "Details": "State-preserved bookmarking and permission diagnostics"
+        },
+        {
+            "Subsystem": "Live Threat Rule Engine",
+            "Status": "🟢 Active Sliding-Window",
+            "Version": "Rules 1-5 Engine",
+            "Details": "Detects host brute-force, targeted accounts, password spraying and lockouts"
         }
     ]
     

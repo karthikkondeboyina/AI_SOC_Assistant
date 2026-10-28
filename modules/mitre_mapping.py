@@ -119,6 +119,47 @@ OFFICIAL_MITRE_MAPPINGS: Dict[str, Dict[str, Any]] = {
         "url": "https://attack.mitre.org/techniques/T1078/",
         "description": "Adversaries establish foothold inside the perimeter and pivot across internal network segments to compromise assets.",
         "rationale": "Multi-stage internal host communication following perimeter breach, exhibiting atypical internal port interaction."
+    },
+    # Live Host Log Monitoring Mappings (Windows Event Logs & Syslog)
+    "Targeted Account Brute-Force": {
+        "technique_id": "T1110.001",
+        "technique_name": "Brute Force: Password Guessing",
+        "tactic": "Credential Access (TA0006)",
+        "url": "https://attack.mitre.org/techniques/T1110/001/",
+        "description": "Adversaries systematically guess passwords for a specific user account on a system to gain unauthorized access.",
+        "rationale": "Cluster of Event 4625 failed authentication records targeting a specific account within a short sliding time window."
+    },
+    "Password Spraying Attack": {
+        "technique_id": "T1110.003",
+        "technique_name": "Brute Force: Password Spraying",
+        "tactic": "Credential Access (TA0006)",
+        "url": "https://attack.mitre.org/techniques/T1110/003/",
+        "description": "Adversaries use a single or small set of common passwords across many accounts to evade account lockout thresholds.",
+        "rationale": "Authentication attempts originating from a single source address distributed across multiple distinct usernames."
+    },
+    "Anomalous Host Failed Logins": {
+        "technique_id": "T1110",
+        "technique_name": "Brute Force",
+        "tactic": "Credential Access (TA0006)",
+        "url": "https://attack.mitre.org/techniques/T1110/",
+        "description": "Repeated failed authentication attempts against a host indicating automated scanning or credential brute-forcing.",
+        "rationale": "High density of Windows Security Event 4625 occurrences exceeding host-wide baseline thresholds."
+    },
+    "Account Lockout Detected": {
+        "technique_id": "T1110",
+        "technique_name": "Brute Force / Account Lockout Triggered",
+        "tactic": "Credential Access (TA0006) & Impact (TA0040)",
+        "url": "https://attack.mitre.org/techniques/T1110/",
+        "description": "User account lockout triggered by repeated invalid authentication attempts, preventing legitimate access.",
+        "rationale": "Windows Security Event 4740 explicitly generated indicating active lockout policy enforcement following brute force attempts."
+    },
+    "Suspicious Remote Interactive (RDP) Failure": {
+        "technique_id": "T1021.001",
+        "technique_name": "Remote Services: Remote Desktop Protocol",
+        "tactic": "Lateral Movement (TA0008) & Initial Access (TA0001)",
+        "url": "https://attack.mitre.org/techniques/T1021/001/",
+        "description": "Adversaries may attempt to log into systems using Remote Desktop Protocol (RDP) using compromised or guessed credentials.",
+        "rationale": "Windows Security Event 4625 with Logon Type 10 (RemoteInteractive) originating from external or unapproved network source."
     }
 }
 

@@ -263,3 +263,4 @@ class WindowsSecurityLogCollector:
                 "error": str(exc),
                 "advice": "Check administrator permissions for Security Event Log access."
             }
+

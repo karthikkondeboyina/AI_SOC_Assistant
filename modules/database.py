@@ -12,15 +12,24 @@ from pathlib import Path
 
 from config.settings import DATABASE_PATH
 
+_DB_INITIALIZED = False
+
 def get_connection() -> sqlite3.Connection:
-    """Returns a SQLite connection with row factory enabled."""
+    """Returns a high-performance SQLite connection with row factory and WAL mode enabled."""
     DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(DATABASE_PATH), check_same_thread=False)
+    conn = sqlite3.connect(str(DATABASE_PATH), check_same_thread=False, timeout=10.0)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode = WAL;")
+    conn.execute("PRAGMA synchronous = NORMAL;")
+    conn.execute("PRAGMA cache_size = -64000;")
+    conn.execute("PRAGMA temp_store = MEMORY;")
     return conn
 
-def init_db():
-    """Initializes database tables if they do not exist."""
+def init_db(force: bool = False):
+    """Initializes database tables if they do not exist (guarded to avoid redundant DDL on every query)."""
+    global _DB_INITIALIZED
+    if _DB_INITIALIZED and not force:
+        return
     conn = get_connection()
     cursor = conn.cursor()
     
@@ -153,6 +162,7 @@ def init_db():
 
     conn.commit()
     conn.close()
+    _DB_INITIALIZED = True
 
 def save_analysis_run(
     run_id: str,
@@ -301,7 +311,7 @@ def get_investigation_report(incident_id: str) -> Optional[Dict[str, Any]]:
         conn.close()
 
 def get_db_metrics() -> Dict[str, int]:
-    """Returns aggregated high-level metrics for dashboard cards."""
+    """Returns aggregated high-level metrics for dashboard cards in a single fast query."""
     init_db()
     conn = get_connection()
     cursor = conn.cursor()
@@ -313,20 +323,22 @@ def get_db_metrics() -> Dict[str, int]:
         "resolved_incidents": 0
     }
     try:
-        cursor.execute("SELECT COUNT(*) FROM analysis_runs;")
-        metrics["total_runs"] = cursor.fetchone()[0]
-        
-        cursor.execute("SELECT COUNT(*) FROM incidents;")
-        metrics["total_incidents"] = cursor.fetchone()[0]
-        
-        cursor.execute("SELECT COUNT(*) FROM incidents WHERE severity IN ('High', 'Critical');")
-        metrics["high_risk_incidents"] = cursor.fetchone()[0]
-        
-        cursor.execute("SELECT COUNT(*) FROM incidents WHERE status IN ('New', 'Under Review');")
-        metrics["active_incidents"] = cursor.fetchone()[0]
-        
-        cursor.execute("SELECT COUNT(*) FROM incidents WHERE status = 'Resolved';")
-        metrics["resolved_incidents"] = cursor.fetchone()[0]
+        cursor.execute("""
+        SELECT
+            (SELECT COUNT(*) FROM analysis_runs),
+            COUNT(*),
+            COALESCE(SUM(CASE WHEN severity IN ('High', 'Critical') THEN 1 ELSE 0 END), 0),
+            COALESCE(SUM(CASE WHEN status IN ('New', 'Under Review') THEN 1 ELSE 0 END), 0),
+            COALESCE(SUM(CASE WHEN status = 'Resolved' THEN 1 ELSE 0 END), 0)
+        FROM incidents;
+        """)
+        row = cursor.fetchone()
+        if row:
+            metrics["total_runs"] = row[0] or 0
+            metrics["total_incidents"] = row[1] or 0
+            metrics["high_risk_incidents"] = row[2] or 0
+            metrics["active_incidents"] = row[3] or 0
+            metrics["resolved_incidents"] = row[4] or 0
     except Exception as e:
         print(f"[-] DB Metrics error: {e}")
     finally:

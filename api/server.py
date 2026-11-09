@@ -216,3 +216,4 @@ if __name__ == "__main__":
     import uvicorn
     print(f"[*] Starting AI SOC Ingestion API on http://{SOC_API_HOST}:{SOC_API_PORT}")
     uvicorn.run("api.server:app", host=SOC_API_HOST, port=SOC_API_PORT, reload=False)
+

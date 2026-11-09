@@ -438,3 +438,4 @@ def get_live_detection_engine() -> LiveDetectionEngine:
     if _LIVE_ENGINE_INSTANCE is None:
         _LIVE_ENGINE_INSTANCE = LiveDetectionEngine()
     return _LIVE_ENGINE_INSTANCE
+

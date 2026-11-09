@@ -122,3 +122,4 @@ def test_alert_cooldown_deduplication():
     # Targeted brute force rule should trigger only once despite 6 attempts due to cooldown
     rule2_alerts = [a for a in alerts if a.rule_id == "RULE-02-TARGETED-BRUTEFORCE"]
     assert len(rule2_alerts) == 1
+

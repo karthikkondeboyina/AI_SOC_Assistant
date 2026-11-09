@@ -80,14 +80,19 @@ def detect_threats(
     # 2. Prepare Features for Model
     X, missing_cols = prepare_features_for_inference(df, expected_features)
     
-    # 3. Predict Classes and Probabilities
+    # 3. Predict Classes and Probabilities (optimized single-pass inference)
     try:
-        predictions = pipeline.predict(X)
         has_proba = hasattr(pipeline, "predict_proba")
         if has_proba:
             probabilities = pipeline.predict_proba(X)
             confidences = np.max(probabilities, axis=1)
+            classes = getattr(pipeline, "classes_", None)
+            if classes is not None:
+                predictions = classes[np.argmax(probabilities, axis=1)]
+            else:
+                predictions = pipeline.predict(X)
         else:
+            predictions = pipeline.predict(X)
             confidences = np.ones(len(predictions))
     except Exception as exc:
         return None, {
@@ -98,9 +103,9 @@ def detect_threats(
     results_df = df.copy()
     results_df["predicted_class"] = predictions
     results_df["confidence"] = np.round(confidences, 4)
-    results_df["is_suspicious"] = results_df["predicted_class"].apply(
-        lambda c: str(c).strip().lower() != "benign"
-    )
+    # Vectorized benign check (faster than Python lambda on large DataFrames)
+    is_benign = np.char.lower(predictions.astype(str)) == "benign"
+    results_df["is_suspicious"] = ~is_benign
     
     # 5. Generate Summary Diagnostics
     class_counts = results_df["predicted_class"].value_counts().to_dict()

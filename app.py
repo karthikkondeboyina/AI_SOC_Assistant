@@ -98,8 +98,34 @@ if "selected_incident_id" not in st.session_state:
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
-# Initialize database schema
+# Initialize database schema (single guarded run)
 init_db()
+
+# Cached Helpers for High-Performance UI Responsiveness
+@st.cache_data(ttl=3)
+def check_api_health(host: str, port: int) -> bool:
+    """Fast non-blocking socket probe for Ingestion API availability with TTL caching."""
+    import socket
+    try:
+        with socket.create_connection((host, port), timeout=0.08):
+            return True
+    except OSError:
+        return False
+
+@st.cache_data(ttl=2)
+def get_cached_db_metrics():
+    """Cached database operational metrics."""
+    return get_db_metrics()
+
+@st.cache_data(ttl=2)
+def get_cached_live_metrics():
+    """Cached live monitoring telemetry metrics."""
+    return get_live_monitoring_metrics()
+
+@st.cache_resource
+def get_cached_threat_model():
+    """Keeps the ML pipeline loaded in memory across sessions."""
+    return load_threat_model()
 
 # ==============================================================================
 # 2. SIDEBAR NAVIGATION & SYSTEM BADGES
@@ -172,8 +198,8 @@ if page == "🏠 Dashboard Overview":
     </div>
     """, unsafe_allow_html=True)
     
-    # Retrieve true operational metrics from SQLite
-    db_metrics = get_db_metrics()
+    # Retrieve true operational metrics from SQLite (cached)
+    db_metrics = get_cached_db_metrics()
     recent_incidents = get_recent_incidents(limit=10)
     
     # Primary Operational Metric Cards
@@ -282,17 +308,10 @@ elif page == "📡 Live Security Monitor":
     </div>
     """, unsafe_allow_html=True)
 
-    live_metrics = get_live_monitoring_metrics()
+    live_metrics = get_cached_live_metrics()
 
-    # Check Ingestion API Status
-    api_online = False
-    try:
-        with httpx.Client(timeout=1.0) as client:
-            r = client.get(f"http://{SOC_API_HOST}:{SOC_API_PORT}/health")
-            if r.status_code == 200:
-                api_online = True
-    except Exception:
-        api_online = False
+    # Fast non-blocking API probe (cached)
+    api_online = check_api_health(SOC_API_HOST, SOC_API_PORT)
 
     # Top KPI Metrics Cards
     k1, k2, k3, k4, k5, k6 = st.columns(6)
@@ -602,20 +621,23 @@ elif page == "📁 Upload Security Data":
         else:
             st.info("Sample dataset will be generated during model training.")
 
-    # Process Uploaded File
+    # Process Uploaded File (parsed only once when a new file is uploaded)
     if uploaded_file is not None:
-        try:
-            if uploaded_file.name.endswith(".parquet"):
-                raw_df = pd.read_parquet(uploaded_file)
-            else:
-                raw_df = pd.read_csv(uploaded_file)
-                
-            st.session_state.dataset = raw_df
-            st.session_state.filename = uploaded_file.name
-            st.session_state.analysis_results = None
-            st.success(f"File '{uploaded_file.name}' loaded successfully!")
-        except Exception as e:
-            st.error(f"Failed to parse uploaded file: {str(e)}")
+        if st.session_state.filename != uploaded_file.name:
+            try:
+                if uploaded_file.name.endswith(".parquet"):
+                    raw_df = pd.read_parquet(uploaded_file)
+                else:
+                    raw_df = pd.read_csv(uploaded_file)
+                    
+                st.session_state.dataset = raw_df
+                st.session_state.filename = uploaded_file.name
+                st.session_state.analysis_results = None
+                st.session_state.analysis_summary = None
+                st.session_state.cached_report_csv = None
+                st.success(f"File '{uploaded_file.name}' loaded successfully ({len(raw_df):,} flows)!")
+            except Exception as e:
+                st.error(f"Failed to parse uploaded file: {str(e)}")
 
     st.divider()
 
@@ -870,14 +892,6 @@ elif page == "🚨 Threat Detection":
                     elapsed = time.time() - t_start
                     summary["elapsed_seconds"] = round(elapsed, 2)
                     
-                    # Pre-generate CSV export to avoid lag on subsequent renders
-                    display_cols = [
-                        "predicted_class", "confidence", "risk_score", "severity",
-                        "is_suspicious", "Protocol", "Flow Duration"
-                    ]
-                    available_display_cols = [c for c in display_cols if c in scored_df.columns]
-                    st.session_state.cached_report_csv = scored_df[available_display_cols].to_csv(index=False).encode("utf-8")
-                    
                     # Store in session state
                     st.session_state.analysis_results = scored_df
                     st.session_state.analysis_summary = summary
@@ -916,11 +930,12 @@ elif page == "🚨 Threat Detection":
             width='stretch'
         )
         
-        # Downloadable Report (Cached bytes - zero latency)
-        if "cached_report_csv" in st.session_state and st.session_state.cached_report_csv:
-            csv_data = st.session_state.cached_report_csv
-        else:
-            csv_data = scored_df[available_display_cols].head(10000).to_csv(index=False).encode("utf-8")
+        # Downloadable Report (Generated on demand)
+        @st.cache_data
+        def build_csv_export(df_slice):
+            return df_slice.to_csv(index=False).encode("utf-8")
+            
+        csv_data = build_csv_export(scored_df[available_display_cols].head(25000))
             
         st.download_button(
             label="📥 Download Detection Report (CSV)",

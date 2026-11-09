@@ -69,3 +69,4 @@ def test_api_event_ingestion_and_alert_trigger(client):
     assert data["received"] == 4
     assert data["ingested"] == 4
     assert data["alerts_triggered"] >= 1
+

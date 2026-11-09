@@ -42,3 +42,4 @@ class AgentConfig(BaseModel):
         default=1000,
         description="Maximum events held in offline buffer during network interruption"
     )
+

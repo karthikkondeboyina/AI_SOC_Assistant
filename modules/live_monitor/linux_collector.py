@@ -117,3 +117,4 @@ class LinuxAuthLogCollector:
             )
 
         return None
+

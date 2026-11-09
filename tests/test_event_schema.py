@@ -81,3 +81,4 @@ def test_windows_event_id_mappings():
     assert WINDOWS_EVENT_ID_MAP[4625] == SecurityEventType.FAILED_LOGIN
     assert WINDOWS_EVENT_ID_MAP[4634] == SecurityEventType.LOGOFF
     assert WINDOWS_EVENT_ID_MAP[4740] == SecurityEventType.ACCOUNT_LOCKOUT
+

@@ -185,3 +185,4 @@ def generate_deterministic_event_id(
 def normalize_security_event(raw_dict: Dict[str, Any]) -> SecurityEvent:
     """Convenience helper to coerce dictionary into validated SecurityEvent."""
     return SecurityEvent(**raw_dict)
+

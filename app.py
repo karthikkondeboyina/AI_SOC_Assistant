@@ -1241,19 +1241,42 @@ elif page == "🤖 AI Investigation":
                 
             st.divider()
             
-            # Interactive Analyst Q&A
+            # Interactive Analyst Q&A (Persistent chat dialogue with fast sub-5s response)
             st.subheader("💬 Ask AI Analyst About This Incident")
-            q_text = st.text_input("Ask a follow-up question (e.g. 'What firewall rule blocks this specific attack pattern?')")
-            if st.button("Send Question"):
+            
+            # Display persistent chat dialogue history
+            if st.session_state.chat_history:
+                for msg in st.session_state.chat_history:
+                    with st.chat_message(msg["role"]):
+                        st.markdown(msg["content"])
+                        if "meta" in msg:
+                            st.caption(msg["meta"])
+                            
+            with st.form("analyst_qa_form", clear_on_submit=True):
+                q_text = st.text_input(
+                    "Ask a follow-up question (e.g. 'What firewall rule blocks this specific attack pattern?')",
+                    key="qa_input_field"
+                )
+                submitted = st.form_submit_button("Send Question", width='stretch')
+                
+            if submitted:
                 if not q_text.strip():
                     st.warning("Please type a question.")
                 elif not is_gemini_configured():
                     st.error("Gemini API key is not configured in .env.")
                 else:
-                    with st.spinner("Analyzing question..."):
+                    st.session_state.chat_history.append({"role": "user", "content": q_text})
+                    with st.spinner("AI Analyst is evaluating your question..."):
+                        t_start = time.time()
                         ans = ask_incident_question(current_inc, q_text)
+                        latency = time.time() - t_start
                         if ans["success"]:
-                            st.markdown(f"**Answer:** {ans['answer']}")
+                            st.session_state.chat_history.append({
+                                "role": "assistant",
+                                "content": ans["answer"],
+                                "meta": f"⚡ Answered in {latency:.2f}s via `{ans.get('model_used', 'Gemini')}`"
+                            })
+                            st.rerun()
                         else:
                             st.error(ans["answer"])
 

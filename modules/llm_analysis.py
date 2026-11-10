@@ -19,11 +19,10 @@ from config.settings import GEMINI_API_KEY, GEMINI_MODEL
 from utils.helpers import sanitize_for_llm
 
 FALLBACK_MODELS = [
-    "gemini-3.8-flash",
-    "gemini-3.5-flash",
     "gemini-flash-lite-latest",
     "gemini-3.5-flash-lite",
-    "gemini-flash-latest"
+    "gemini-3.5-flash",
+    "gemini-3.8-flash"
 ]
 
 def generate_with_retry_and_fallback(
@@ -62,14 +61,15 @@ def generate_with_retry_and_fallback(
                     }
                 )
                 text = response.text if hasattr(response, "text") else str(response)
-                return text, model_name, None
+                if text:
+                    return text, model_name, None
             except Exception as exc:
                 err_str = str(exc)
                 last_error = err_str
                 # If transient error (503 UNAVAILABLE, 429 RATE_LIMIT, High Demand), wait and retry
                 is_transient = any(code in err_str for code in ["503", "429", "UNAVAILABLE", "high demand", "RESOURCE_EXHAUSTED"])
                 if is_transient and attempt == 0:
-                    delay = 1.0 + random.uniform(0.2, 0.6)
+                    delay = 1.0 + random.uniform(0.2, 0.5)
                     time.sleep(delay)
                     continue
                 else:
@@ -79,13 +79,19 @@ def generate_with_retry_and_fallback(
     return None, None, last_error
 
 def get_gemini_client():
-    """Initializes and returns a Gemini Client instance if API key is configured."""
+    """Initializes and returns a Gemini Client instance configured with timeouts and fast retries."""
     api_key = os.getenv("GEMINI_API_KEY", GEMINI_API_KEY)
     if not api_key or api_key == "your_gemini_api_key_here":
         return None
     try:
         from google import genai
-        return genai.Client(api_key=api_key)
+        from google.genai import types
+        # Prevent long client-level hangs on congested models
+        http_options = types.HttpOptions(
+            timeout=15000, # 15s timeout per attempt
+            retry_options=types.HttpRetryOptions(attempts=1) # Let our fallback chain handle switching immediately
+        )
+        return genai.Client(api_key=api_key, http_options=http_options)
     except Exception as e:
         print(f"[-] Gemini client initialization error: {e}")
         return None
@@ -216,7 +222,8 @@ Analyst Question:
         client=client,
         contents=prompt,
         system_instruction=system_instruction,
-        temperature=0.2
+        temperature=0.2,
+        preferred_model="gemini-flash-lite-latest"
     )
     if answer_text:
         return {"success": True, "answer": answer_text, "model_used": model_used}

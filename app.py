@@ -52,7 +52,8 @@ from modules.database import (
     update_live_alert_status,
     get_recent_security_events,
     get_live_monitoring_metrics,
-    convert_alert_to_incident
+    convert_alert_to_incident,
+    get_incident_distribution_metrics
 )
 from modules.incident_manager import group_suspicious_flows_into_incidents
 from modules.llm_analysis import is_gemini_configured, analyze_security_incident, ask_incident_question
@@ -121,6 +122,16 @@ def get_cached_db_metrics():
 def get_cached_live_metrics():
     """Cached live monitoring telemetry metrics."""
     return get_live_monitoring_metrics()
+
+@st.cache_data(ttl=2)
+def get_cached_incident_distribution():
+    """Cached incident attack and severity distributions from database."""
+    return get_incident_distribution_metrics()
+
+@st.cache_data(ttl=2)
+def get_cached_recent_incidents(limit: int = 10):
+    """Cached recent security incidents queue."""
+    return get_recent_incidents(limit=limit)
 
 @st.cache_resource
 def get_cached_threat_model():
@@ -200,7 +211,7 @@ if page == "🏠 Dashboard Overview":
     
     # Retrieve true operational metrics from SQLite (cached)
     db_metrics = get_cached_db_metrics()
-    recent_incidents = get_recent_incidents(limit=10)
+    recent_incidents = get_cached_recent_incidents(limit=10)
     
     # Primary Operational Metric Cards
     c1, c2, c3, c4 = st.columns(4)
@@ -216,7 +227,7 @@ if page == "🏠 Dashboard Overview":
     
     st.markdown("<br>", unsafe_allow_html=True)
     
-    # Visual Analytics Row
+    # Visual Analytics Row (Always rendered: active session OR database historical telemetry)
     if st.session_state.analysis_results is not None:
         res_df = st.session_state.analysis_results
         
@@ -264,10 +275,87 @@ if page == "🏠 Dashboard Overview":
             )
             fig_bar.update_layout(margin=dict(t=20, b=20, l=20, r=20), height=320, showlegend=False)
             st.plotly_chart(fig_bar, width='stretch')
+
+    elif db_metrics["total_incidents"] > 0:
+        # Display aggregated historical threat telemetry from SQLite
+        dist = get_cached_incident_distribution()
+        
+        col_left, col_right = st.columns(2)
+        with col_left:
+            st.subheader("📊 Attack Categories (Recorded Incidents)")
+            atk_dict = dist.get("attack_counts", {})
+            if atk_dict:
+                atk_df = pd.DataFrame(list(atk_dict.items()), columns=["Attack Category", "Incidents"])
+                fig_pie = px.pie(
+                    atk_df,
+                    names="Attack Category",
+                    values="Incidents",
+                    hole=0.45,
+                    template="plotly_dark",
+                    color_discrete_sequence=px.colors.sequential.Tealgrn_r
+                )
+                fig_pie.update_layout(margin=dict(t=20, b=20, l=20, r=20), height=320)
+                st.plotly_chart(fig_pie, width='stretch')
+            else:
+                st.info("No recorded incident categories.")
+                
+        with col_right:
+            st.subheader("⚡ Incident Severity Breakdown (Database)")
+            sev_dict = dist.get("severity_counts", {})
+            if sev_dict:
+                sev_df = pd.DataFrame(list(sev_dict.items()), columns=["Severity", "Count"])
+                color_map = {
+                    "Critical": "#EF4444",
+                    "High": "#F97316",
+                    "Medium": "#EAB308",
+                    "Low": "#3B82F6",
+                    "Benign": "#10B981"
+                }
+                fig_bar = px.bar(
+                    sev_df,
+                    x="Severity",
+                    y="Count",
+                    color="Severity",
+                    color_discrete_map=color_map,
+                    template="plotly_dark"
+                )
+                fig_bar.update_layout(margin=dict(t=20, b=20, l=20, r=20), height=320, showlegend=False)
+                st.plotly_chart(fig_bar, width='stretch')
+            else:
+                st.info("No severity counts available.")
+                
+        st.caption(f"⚡ Displaying aggregate threat telemetry from {db_metrics['total_incidents']} recorded incidents in database.")
             
     else:
-        # Informative Empty State
-        st.info("ℹ️ No active telemetry analysis in session. Upload a dataset or load the sample data to display real-time telemetry charts.")
+        # Informative Quick-Start State
+        st.markdown("""
+        <div style="background-color: #132238; border: 1px dashed #203552; border-radius: 8px; padding: 24px; text-align: center;">
+            <h3 style="color: #F8FAFC; margin-bottom: 8px;">🚀 Welcome to AI SOC Assistant</h3>
+            <p style="color: #94A3B8; margin: 0; font-size: 0.95rem;">No telemetry analysis or incident records have been logged in this session yet.</p>
+            <p style="color: #64748B; font-size: 0.85rem; margin-top: 6px;">Click below to load genuine sample network traffic and populate all visual telemetry charts in ~1 second.</p>
+        </div>
+        """, unsafe_allow_html=True)
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("⚡ Load Demo Telemetry & Populate Operational Dashboard", width='stretch'):
+            sample_path = SAMPLE_DATA_DIR / "sample_soc_traffic.csv"
+            if sample_path.exists():
+                sample_df = pd.read_csv(sample_path)
+                st.session_state.dataset = sample_df
+                st.session_state.filename = "sample_soc_traffic.csv"
+                results_df, summary = detect_threats(sample_df)
+                if results_df is not None:
+                    scored_df = batch_calculate_risk(results_df)
+                    incidents = group_suspicious_flows_into_incidents(scored_df, run_id="DEMO-RUN")
+                    for inc in incidents:
+                        mitre_info = map_threat_to_mitre(inc["threat_category"])
+                        inc["mitre_technique_id"] = mitre_info["technique_id"]
+                        inc["mitre_technique_name"] = mitre_info["technique_name"]
+                    save_analysis_run("DEMO-RUN", "sample_soc_traffic.csv", len(sample_df), summary["suspicious_count"], "1.0.0", summary)
+                    save_incidents(incidents)
+                    st.session_state.analysis_results = scored_df
+                    st.session_state.analysis_summary = summary
+                    st.session_state.current_incidents = incidents
+                    st.rerun()
         
     st.divider()
     
@@ -597,6 +685,36 @@ elif page == "📁 Upload Security Data":
     </div>
     """, unsafe_allow_html=True)
     
+    # Show persistent Active Dataset banner if already loaded in session
+    if st.session_state.dataset is not None:
+        st.markdown(f"""
+        <div style="background: rgba(16, 185, 129, 0.12); border: 1px solid #10B981; border-radius: 8px; padding: 16px 20px; margin-bottom: 20px;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                    <h3 style="margin: 0 0 6px 0; color: #F8FAFC; font-size: 1.15rem;">📁 Active Telemetry: <code>{st.session_state.filename}</code></h3>
+                    <p style="margin: 0; color: #94A3B8; font-size: 0.9rem;">
+                        <b>{len(st.session_state.dataset):,}</b> total records loaded into active memory | Ready for threat detection
+                    </p>
+                </div>
+                <span style="background: #064E3B; color: #6EE7B7; border: 1px solid #059669; padding: 6px 14px; border-radius: 6px; font-size: 0.85rem; font-weight: bold;">
+                    ✅ LOADED IN SESSION
+                </span>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        c_nav1, c_nav2 = st.columns([3, 1])
+        with c_nav1:
+            st.info("💡 To classify network threats and evaluate risk scores on this file, proceed to **'🚨 Threat Detection'** in the sidebar.")
+        with c_nav2:
+            if st.button("🗑️ Unload / Replace File", key="btn_unload_dataset", width='stretch'):
+                st.session_state.dataset = None
+                st.session_state.filename = None
+                st.session_state.analysis_results = None
+                st.session_state.analysis_summary = None
+                st.session_state.cached_report_csv = None
+                st.rerun()
+
     col_upload, col_sample = st.columns([2, 1])
     
     with col_upload:
@@ -604,6 +722,7 @@ elif page == "📁 Upload Security Data":
         uploaded_file = st.file_uploader(
             "Select network flow file (CSV or Parquet)",
             type=["csv", "parquet"],
+            key="telemetry_csv_uploader",
             help="Supports network-flow captures conforming to the CIC-IDS2017 schema."
         )
         
@@ -636,6 +755,7 @@ elif page == "📁 Upload Security Data":
                 st.session_state.analysis_summary = None
                 st.session_state.cached_report_csv = None
                 st.success(f"File '{uploaded_file.name}' loaded successfully ({len(raw_df):,} flows)!")
+                st.rerun()
             except Exception as e:
                 st.error(f"Failed to parse uploaded file: {str(e)}")
 

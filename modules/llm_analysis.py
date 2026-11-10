@@ -5,8 +5,10 @@ using Google Gemini API (google-genai SDK). Prevents prompt injection and handle
 missing keys, quotas, and network errors gracefully.
 """
 
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple
 import os
+import time
+import random
 try:
     from dotenv import load_dotenv
     load_dotenv()
@@ -15,6 +17,66 @@ except ImportError:
 
 from config.settings import GEMINI_API_KEY, GEMINI_MODEL
 from utils.helpers import sanitize_for_llm
+
+FALLBACK_MODELS = [
+    "gemini-3.8-flash",
+    "gemini-3.5-flash",
+    "gemini-flash-lite-latest",
+    "gemini-3.5-flash-lite",
+    "gemini-flash-latest"
+]
+
+def generate_with_retry_and_fallback(
+    client,
+    contents: str,
+    system_instruction: str,
+    temperature: float = 0.2,
+    preferred_model: Optional[str] = None
+) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+    """
+    Attempts content generation with exponential backoff on transient errors (503, 429)
+    and graceful automated fallback across alternative high-availability models.
+    
+    Returns:
+        (generated_text, model_used, error_message)
+    """
+    primary = preferred_model or os.getenv("GEMINI_MODEL", GEMINI_MODEL)
+    
+    # Construct ordered candidate list without duplicates
+    models_to_try = [primary]
+    for m in FALLBACK_MODELS:
+        if m not in models_to_try:
+            models_to_try.append(m)
+            
+    last_error = ""
+    for model_name in models_to_try:
+        # Retry up to 2 attempts per candidate model
+        for attempt in range(2):
+            try:
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=contents,
+                    config={
+                        "system_instruction": system_instruction,
+                        "temperature": temperature,
+                    }
+                )
+                text = response.text if hasattr(response, "text") else str(response)
+                return text, model_name, None
+            except Exception as exc:
+                err_str = str(exc)
+                last_error = err_str
+                # If transient error (503 UNAVAILABLE, 429 RATE_LIMIT, High Demand), wait and retry
+                is_transient = any(code in err_str for code in ["503", "429", "UNAVAILABLE", "high demand", "RESOURCE_EXHAUSTED"])
+                if is_transient and attempt == 0:
+                    delay = 1.0 + random.uniform(0.2, 0.6)
+                    time.sleep(delay)
+                    continue
+                else:
+                    # Non-transient or exhausted attempt for this model, try next model in fallback list
+                    break
+                    
+    return None, None, last_error
 
 def get_gemini_client():
     """Initializes and returns a Gemini Client instance if API key is configured."""
@@ -95,26 +157,23 @@ OBSERVED INCIDENT DATA (UNTRUSTED):
 Generate the structured defensive SOC advisory report strictly following the requested sections.
 """
 
-    model_name = os.getenv("GEMINI_MODEL", GEMINI_MODEL)
-    try:
-        response = client.models.generate_content(
-            model=model_name,
-            contents=user_prompt,
-            config={
-                "system_instruction": system_prompt,
-                "temperature": 0.2, # Low temperature for objective security analysis
-            }
-        )
-        report_text = response.text if hasattr(response, "text") else str(response)
+    report_text, model_used, err_msg = generate_with_retry_and_fallback(
+        client=client,
+        contents=user_prompt,
+        system_instruction=system_prompt,
+        temperature=0.2
+    )
+
+    if report_text:
         return {
             "success": True,
             "error_type": None,
             "report": report_text,
+            "model_used": model_used,
             "disclaimer": "AI-generated analysis is decision support and should be reviewed by a human cybersecurity analyst."
         }
-    except Exception as exc:
-        err_msg = str(exc)
-        print(f"[-] Gemini API invocation failure: {err_msg}")
+    else:
+        print(f"[-] Gemini API invocation failure across candidate models: {err_msg}")
         return {
             "success": False,
             "error_type": "API_ERROR",
@@ -153,13 +212,13 @@ Incident Context:
 Analyst Question:
 {clean_question}
 """
-    model_name = os.getenv("GEMINI_MODEL", GEMINI_MODEL)
-    try:
-        response = client.models.generate_content(
-            model=model_name,
-            contents=prompt,
-            config={"system_instruction": system_instruction, "temperature": 0.2}
-        )
-        return {"success": True, "answer": response.text}
-    except Exception as e:
-        return {"success": False, "answer": f"Error communicating with Gemini: {str(e)}"}
+    answer_text, model_used, err_msg = generate_with_retry_and_fallback(
+        client=client,
+        contents=prompt,
+        system_instruction=system_instruction,
+        temperature=0.2
+    )
+    if answer_text:
+        return {"success": True, "answer": answer_text, "model_used": model_used}
+    else:
+        return {"success": False, "answer": f"Error communicating with Gemini: {err_msg}"}

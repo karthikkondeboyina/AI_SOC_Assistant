@@ -244,6 +244,28 @@ def get_recent_incidents(limit: int = 50) -> List[Dict[str, Any]]:
     finally:
         conn.close()
 
+def get_incident_distribution_metrics() -> Dict[str, Any]:
+    """Returns aggregated attack categories and severity counts across all recorded incidents."""
+    init_db()
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT threat_category, COUNT(*) as cnt FROM incidents GROUP BY threat_category ORDER BY cnt DESC;")
+        attack_counts = {row[0]: row[1] for row in cursor.fetchall()}
+        
+        cursor.execute("SELECT severity, COUNT(*) as cnt FROM incidents GROUP BY severity ORDER BY cnt DESC;")
+        severity_counts = {row[0]: row[1] for row in cursor.fetchall()}
+        
+        return {
+            "attack_counts": attack_counts,
+            "severity_counts": severity_counts
+        }
+    except Exception as e:
+        print(f"[-] Error fetching incident distribution: {e}")
+        return {"attack_counts": {}, "severity_counts": {}}
+    finally:
+        conn.close()
+
 def get_incident_by_id(incident_id: str) -> Optional[Dict[str, Any]]:
     """Retrieves a single incident by its unique ID."""
     init_db()
